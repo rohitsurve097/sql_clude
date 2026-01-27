@@ -1,0 +1,87 @@
+WITH valid_suppliers AS (
+    SELECT 
+        supplr_nm,
+        itm_id,
+        site_id,
+        rgn_cd,
+        data_msr
+    FROM dsc_procure.gds_post_tan_supply
+    WHERE data_version = 7647
+      AND data_msr IN (
+            'Commit Ocean',
+            'Commit Surface',
+            'MAV ASN Ocean',
+            'Commit Air',
+            'MAV ASN Express Air',
+            'MAV Commit Ocean',
+            'Incremental Upside',
+            'MAV ASN Truck',
+            'MAV Commit Truck',
+            'ASN Ocean',
+            'ASN Rail',
+            'Adjusted Supply (Buyer)'
+          )
+      AND bucket_dt >= '2026-01-24'
+      AND bucket_dt < '2026-01-24'::date + INTERVAL '182 days'  -- Full 182-day period
+      AND Part_SITE IN ('00PHN_APCC')
+      AND itm_id IN ('00PHN')
+      AND site_id IN ('APCC')
+      AND supplr_nm IN (
+            'LONGWELL ELECTRONIC INC',
+            'VOLEX',
+            'MEINAISHI HONGLIN ELECTRONIC'
+          )
+    GROUP BY supplr_nm, itm_id, site_id, rgn_cd, data_msr
+    HAVING SUM(qty) > 0  -- Only suppliers with non-zero total qty in 182 days
+)
+SELECT
+    dmtbl.itm_id        AS "Part",
+    dmtbl.site_id       AS "DISCP Site",
+    dmtbl.rgn_cd        AS "DISCP Region",
+    dmtbl.bucket_dt     AS "Date",
+    dmtbl.data_msr      AS "data_msr",
+    SUM(dmtbl.qty)      AS "qty",
+    dmtbl.supplr_nm     AS "Supplier"
+FROM dsc_procure.gds_post_tan_supply dmtbl
+WHERE dmtbl.data_version = 7647
+  AND dmtbl.data_msr IN (
+        'Commit Ocean',
+        'Commit Surface',
+        'MAV ASN Ocean',
+        'Commit Air',
+        'MAV ASN Express Air',
+        'MAV Commit Ocean',
+        'Incremental Upside',
+        'MAV ASN Truck',
+        'MAV Commit Truck',
+        'ASN Ocean',
+        'ASN Rail',
+        'Adjusted Supply (Buyer)'
+      )
+  AND dmtbl.bucket_dt >= '2026-01-24'
+  AND dmtbl.bucket_dt < '2026-07-25'  -- This will be 21 or 182 days based on API call
+  AND dmtbl.Part_SITE IN ('00PHN_APCC')
+  AND dmtbl.itm_id IN ('00PHN')
+  AND dmtbl.site_id IN ('APCC')
+  AND dmtbl.supplr_nm IN (
+        'LONGWELL ELECTRONIC INC',
+        'VOLEX',
+        'MEINAISHI HONGLIN ELECTRONIC'
+      )
+  -- NEW: Join with valid_suppliers CTE
+  AND EXISTS (
+      SELECT 1 
+      FROM valid_suppliers vs 
+      WHERE vs.supplr_nm = dmtbl.supplr_nm
+        AND vs.itm_id = dmtbl.itm_id
+        AND vs.site_id = dmtbl.site_id
+        AND vs.rgn_cd = dmtbl.rgn_cd
+        AND vs.data_msr = dmtbl.data_msr
+  )
+GROUP BY
+    dmtbl.itm_id,
+    dmtbl.site_id,
+    dmtbl.rgn_cd,
+    dmtbl.bucket_dt,
+    dmtbl.data_msr,
+    dmtbl.supplr_nm;
