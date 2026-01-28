@@ -1,0 +1,61 @@
+async def getDataMeasureDtlsQry(reqInf: ReqInference):
+    
+    select = '''
+        dmtbl.itm_id as "Part", 
+        dmtbl.site_id as "DISCP Site", 
+        dmtbl.rgn_cd as "DISCP Region", 
+        dmtbl.bucket_dt as "Date",
+        dmtbl.data_msr as "data_msr", 
+        sum(dmtbl.qty) as "qty"
+    '''
+    
+    group = '''
+        dmtbl.itm_id, dmtbl.site_id, dmtbl.rgn_cd, dmtbl.bucket_dt, dmtbl.data_msr
+    '''
+    
+    where = f'''
+        {TBL_ALIAS}.data_version = :{DN_DATA_VERSION}
+        and {TBL_ALIAS}.{TableCol.DATA_MEASURE.value} in :{DATA_MEASURES}
+        and {TBL_ALIAS}.{TableCol.BUCKET_DT.value} >= :{LAST_SATURDAY}
+        and {TBL_ALIAS}.{TableCol.BUCKET_DT.value} < :{END_DAY}
+        and {TBL_ALIAS}.{TableCol.PART_SITE.value} in :{PART_SITE}
+        and {TBL_ALIAS}.{TableCol.ITM_ID.value} in :{PART}
+        and {TBL_ALIAS}.{TableCol.SITE_ID.value} in :{DISCP_SITE}
+    '''
+    
+    if 'Supplier' in reqInf.table:
+        select += ', dmtbl.supplr_nm as "Supplier"'
+        group += ', dmtbl.supplr_nm'
+        where += 'and dmtbl.supplr_nm IN :Supplier'
+        
+        # NEW: Add subquery to filter suppliers with non-zero total qty in 182-day period
+        where += f'''
+        and (dmtbl.supplr_nm, dmtbl.itm_id, dmtbl.site_id, dmtbl.rgn_cd, dmtbl.data_msr) IN (
+            SELECT 
+                supplr_nm, itm_id, site_id, rgn_cd, data_msr
+            FROM dsc_procure.{reqInf.table}
+            WHERE data_version = :{DN_DATA_VERSION}
+              AND {TableCol.DATA_MEASURE.value} in :{DATA_MEASURES}
+              AND {TableCol.BUCKET_DT.value} >= :{LAST_SATURDAY}
+              AND {TableCol.BUCKET_DT.value} < :{LAST_SATURDAY} + INTERVAL '182 days'
+              AND {TableCol.PART_SITE.value} in :{PART_SITE}
+              AND {TableCol.ITM_ID.value} in :{PART}
+              AND {TableCol.SITE_ID.value} in :{DISCP_SITE}
+              AND supplr_nm IN :Supplier
+            GROUP BY supplr_nm, itm_id, site_id, rgn_cd, data_msr
+            HAVING SUM(qty) > 0
+        )
+        '''
+    
+    if reqInf.table == GDS_SUPPLY_ALLOCATION:
+        where += f''' and {TBL_ALIAS}.{TableCol.GDS_RVG_TYPE.value} = 'PostTAN'
+        '''
+    
+    query = f'''
+        SELECT {select}
+        FROM dsc_procure.{reqInf.table} {TBL_ALIAS}
+        WHERE {where}
+        GROUP BY {group}
+    '''
+    
+    return query
